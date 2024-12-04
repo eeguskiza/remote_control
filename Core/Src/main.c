@@ -21,7 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -31,7 +31,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define THRESHOLD 10
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -46,6 +46,9 @@ ADC_HandleTypeDef hadc2;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+uint16_t lastX = 0;
+uint16_t lastY = 0;
+
 uint16_t readValueX;
 uint16_t readValueY;
 /* USER CODE END PV */
@@ -114,7 +117,18 @@ int main(void)
 	  HAL_ADC_PollForConversion(&hadc2,1000);
 	  readValueY = HAL_ADC_GetValue(&hadc2);
 
+	  // hacer que solo imprima cuando hay un cambio en el joystick (quitar ruido)
+	  if (abs(readValueX - lastX) > THRESHOLD || abs(readValueY - lastY) > THRESHOLD)
+	  {
+		  lastX = readValueX;
+		  lastY = readValueY;
 
+		  char msg[20];
+		  sprintf(msg, "%d//%d\r\n", readValueX, readValueY);
+
+		  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+
+	  }
 	  HAL_Delay(100);
     /* USER CODE END WHILE */
 
