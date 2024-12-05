@@ -31,7 +31,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define THRESHOLD 10
+#define NUM_READINGS 10
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -42,15 +42,14 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 ADC_HandleTypeDef hadc2;
-
 UART_HandleTypeDef huart2;
 
-/* USER CODE BEGIN PV */
-uint16_t lastX = 0;
-uint16_t lastY = 0;
+uint16_t readingsX[NUM_READINGS];
+uint16_t readingsY[NUM_READINGS];
+int index = 0;
 
-uint16_t readValueX;
-uint16_t readValueY;
+/* USER CODE BEGIN PV */
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -59,13 +58,33 @@ static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_ADC2_Init(void);
+int calculate_average(uint16_t readings[], int size); // Prototipo de la función
+
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+int calculate_average(uint16_t readings[], int size) {
+    int i;
+    uint16_t min = readings[0];
+    uint16_t max = readings[0];
+    int sum = 0;
 
+    // Encontrar el mínimo y el máximo
+    for (i = 0; i < size; i++) {
+        if (readings[i] < min) min = readings[i];
+        if (readings[i] > max) max = readings[i];
+        sum += readings[i];
+    }
+
+    // Restar el mínimo y el máximo del total
+    sum -= (min + max);
+
+    // Calcular el promedio de los valores restantes y devolver como entero
+    return sum / (size - 2); // Cambiamos a un entero
+}
 /* USER CODE END 0 */
 
 /**
@@ -109,31 +128,32 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-
+  // Leer valores del ADC
 	  HAL_ADC_Start(&hadc1);
-	  HAL_ADC_PollForConversion(&hadc1,1000);
-	  readValueX = HAL_ADC_GetValue(&hadc1);
+	  HAL_ADC_PollForConversion(&hadc1, 1000);
+	  readingsX[index] = HAL_ADC_GetValue(&hadc1);
+
 	  HAL_ADC_Start(&hadc2);
-	  HAL_ADC_PollForConversion(&hadc2,1000);
-	  readValueY = HAL_ADC_GetValue(&hadc2);
+	  HAL_ADC_PollForConversion(&hadc2, 1000);
+	  readingsY[index] = HAL_ADC_GetValue(&hadc2);
 
-	  // hacer que solo imprima cuando hay un cambio en el joystick (quitar ruido)
-	  if (abs(readValueX - lastX) > THRESHOLD || abs(readValueY - lastY) > THRESHOLD)
-	  {
-		  lastX = readValueX;
-		  lastY = readValueY;
+	  index++;
 
-		  char msg[20];
-		  sprintf(msg, "%d//%d\r\n", readValueX, readValueY);
+	  // Si ya tenemos 10 lecturas, procesarlas
+	  if (index == NUM_READINGS) {
+	          int avgX = calculate_average(readingsX, NUM_READINGS);
+	          int avgY = calculate_average(readingsY, NUM_READINGS);
 
-		  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+	          char msg[50];
+	          sprintf(msg, "%d//%d\r\n", avgX, avgY);
+	          HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
 
+	          // Reiniciar índice para nuevas lecturas
+	          index = 0;
 	  }
-	  HAL_Delay(100);
-    /* USER CODE END WHILE */
 
-    /* USER CODE BEGIN 3 */
-  }
+	  HAL_Delay(100); // Ajustar el retraso según sea necesario
+	}
   /* USER CODE END 3 */
 }
 
