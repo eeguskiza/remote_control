@@ -42,13 +42,14 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 ADC_HandleTypeDef hadc2;
+
+UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
+/* USER CODE BEGIN PV */
 uint16_t readingsX[NUM_READINGS];
 uint16_t readingsY[NUM_READINGS];
 int index = 0;
-
-/* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
 
@@ -58,8 +59,7 @@ static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_ADC2_Init(void);
-int calculate_average(uint16_t readings[], int size); // Prototipo de la función
-
+static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -119,6 +119,7 @@ int main(void)
   MX_USART2_UART_Init();
   MX_ADC1_Init();
   MX_ADC2_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
 
@@ -128,32 +129,36 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-  // Leer valores del ADC
-	  HAL_ADC_Start(&hadc1);
-	  HAL_ADC_PollForConversion(&hadc1, 1000);
-	  readingsX[index] = HAL_ADC_GetValue(&hadc1);
+	  // Leer valores del ADC
+	  	  HAL_ADC_Start(&hadc1);
+	  	  HAL_ADC_PollForConversion(&hadc1, 1000);
+	  	  readingsX[index] = HAL_ADC_GetValue(&hadc1);
 
-	  HAL_ADC_Start(&hadc2);
-	  HAL_ADC_PollForConversion(&hadc2, 1000);
-	  readingsY[index] = HAL_ADC_GetValue(&hadc2);
+	  	  HAL_ADC_Start(&hadc2);
+	  	  HAL_ADC_PollForConversion(&hadc2, 1000);
+	  	  readingsY[index] = HAL_ADC_GetValue(&hadc2);
 
-	  index++;
+	  	  index++;
 
-	  // Si ya tenemos 10 lecturas, procesarlas
-	  if (index == NUM_READINGS) {
-	          int avgX = calculate_average(readingsX, NUM_READINGS);
-	          int avgY = calculate_average(readingsY, NUM_READINGS);
+	  	  // Si ya tenemos 10 lecturas, procesarlas
+	  	  if (index == NUM_READINGS) {
+	  	          int avgX = calculate_average(readingsX, NUM_READINGS);
+	  	          int avgY = calculate_average(readingsY, NUM_READINGS);
 
-	          char msg[50];
-	          sprintf(msg, "%d//%d\r\n", avgX, avgY);
-	          HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+	  	          char msg[50];
+	  	          sprintf(msg, "%d/%d\r\n", avgX, avgY);
+	  	          HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+	  	          HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+	  	          // Reiniciar índice para nuevas lecturas
+	  	          index = 0;
+	  	  }
 
-	          // Reiniciar índice para nuevas lecturas
-	          index = 0;
-	  }
+	  	  HAL_Delay(100); // Ajustar el retraso según sea necesario
 
-	  HAL_Delay(100); // Ajustar el retraso según sea necesario
-	}
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
+  }
   /* USER CODE END 3 */
 }
 
@@ -194,7 +199,8 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC12;
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_ADC12;
+  PeriphClkInit.Usart1ClockSelection = RCC_USART1CLKSOURCE_PCLK1;
   PeriphClkInit.Adc12ClockSelection = RCC_ADC12PLLCLK_DIV1;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
@@ -292,7 +298,7 @@ static void MX_ADC2_Init(void)
   hadc2.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
   hadc2.Init.Resolution = ADC_RESOLUTION_12B;
   hadc2.Init.ScanConvMode = ADC_SCAN_DISABLE;
-  hadc2.Init.ContinuousConvMode = ENABLE;
+  hadc2.Init.ContinuousConvMode = DISABLE;
   hadc2.Init.DiscontinuousConvMode = DISABLE;
   hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
   hadc2.Init.ExternalTrigConv = ADC_SOFTWARE_START;
@@ -309,7 +315,7 @@ static void MX_ADC2_Init(void)
 
   /** Configure Regular Channel
   */
-  sConfig.Channel = ADC_CHANNEL_2;
+  sConfig.Channel = ADC_CHANNEL_1;
   sConfig.Rank = ADC_REGULAR_RANK_1;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
   sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
@@ -322,6 +328,41 @@ static void MX_ADC2_Init(void)
   /* USER CODE BEGIN ADC2_Init 2 */
 
   /* USER CODE END ADC2_Init 2 */
+
+}
+
+/**
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART1_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART1_Init 0 */
+
+  /* USER CODE END USART1_Init 0 */
+
+  /* USER CODE BEGIN USART1_Init 1 */
+
+  /* USER CODE END USART1_Init 1 */
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 9600;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART1_Init 2 */
+
+  /* USER CODE END USART1_Init 2 */
 
 }
 
@@ -373,6 +414,7 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
