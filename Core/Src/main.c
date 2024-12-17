@@ -32,6 +32,8 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define NUM_READINGS 10
+#define DEADZONE 35  // Rango de la zona muerta (para el ruido)
+#define CHANGE_THRESHOLD 5  // Umbral mínimo de cambio para transmitir
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -50,7 +52,10 @@ UART_HandleTypeDef huart2;
 uint16_t readingsX[NUM_READINGS];
 uint16_t readingsY[NUM_READINGS];
 int index = 0;
-
+uint16_t centerX = 2048;  // Valor central de X
+uint16_t centerY = 2048;  // Valor central de Y
+int lastSentX = 0;  // Último valor enviado del eje X
+int lastSentY = 0;  // Último valor enviado del eje Y
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -66,25 +71,45 @@ static void MX_USART1_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-int calculate_average(uint16_t readings[], int size) {
-    int i;
+int calculate_average(uint16_t readings[], const int size) {
+    if (size <= 2) return 0; // Evita errores si el tamaño es insuficiente
+
     uint16_t min = readings[0];
     uint16_t max = readings[0];
-    int sum = 0;
+    int sum = readings[0];
 
-    // Encontrar el mínimo y el máximo
-    for (i = 0; i < size; i++) {
-        if (readings[i] < min) min = readings[i];
-        if (readings[i] > max) max = readings[i];
-        sum += readings[i];
+    // Recorrer el array una vez
+    for (int i = 1; i < size; i++) {
+        uint16_t value = readings[i];
+        if (value < min) min = value;
+        if (value > max) max = value;
+        sum += value;
     }
 
-    // Restar el mínimo y el máximo del total
+    // Restar el mínimo y el máximo
     sum -= (min + max);
 
-    // Calcular el promedio de los valores restantes y devolver como entero
-    return sum / (size - 2); // Cambiamos a un entero
+    // Devolver el promedio
+    return sum / (size - 2);
 }
+
+int apply_deadzone(int value, int center) {
+    if (value > center - DEADZONE && value < center + DEADZONE) {
+        return center;  // Si está dentro de la zona muerta, ajusta al valor central
+    }
+    return value;  // Si está fuera, devuelve el valor original
+}
+
+void LED_On(void) {
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_SET);  // Encender LED
+}
+
+void LED_Off(void) {
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_RESET);  // Apagar LED
+}
+
+
+
 /* USER CODE END 0 */
 
 /**
@@ -127,33 +152,67 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+#define INIT_SAMPLES 100  // Número de muestras para calibrar el centro
+
+// Calibrar el centro del joystick
+int tempSumX = 0, tempSumY = 0;
+for (int i = 0; i < INIT_SAMPLES; i++) {
+    HAL_ADC_Start(&hadc1);
+    HAL_ADC_PollForConversion(&hadc1, 1000);
+    tempSumX += HAL_ADC_GetValue(&hadc1);
+
+    HAL_ADC_Start(&hadc2);
+    HAL_ADC_PollForConversion(&hadc2, 1000);
+    tempSumY += HAL_ADC_GetValue(&hadc2);
+
+    HAL_Delay(10);  // Pequeña pausa entre lecturas
+}
+centerX = tempSumX / INIT_SAMPLES;
+centerY = tempSumY / INIT_SAMPLES;
   while (1)
   {
 	  // Leer valores del ADC
-	  	  HAL_ADC_Start(&hadc1);
-	  	  HAL_ADC_PollForConversion(&hadc1, 1000);
-	  	  readingsX[index] = HAL_ADC_GetValue(&hadc1);
+	      HAL_ADC_Start(&hadc1);
+	      HAL_ADC_PollForConversion(&hadc1, 1000);
+	      readingsX[index] = HAL_ADC_GetValue(&hadc1);
 
-	  	  HAL_ADC_Start(&hadc2);
-	  	  HAL_ADC_PollForConversion(&hadc2, 1000);
-	  	  readingsY[index] = HAL_ADC_GetValue(&hadc2);
+	      HAL_ADC_Start(&hadc2);
+	      HAL_ADC_PollForConversion(&hadc2, 1000);
+	      readingsY[index] = HAL_ADC_GetValue(&hadc2);
 
-	  	  index++;
+	      index++;
 
-	  	  // Si ya tenemos 10 lecturas, procesarlas
-	  	  if (index == NUM_READINGS) {
-	  	          int avgX = calculate_average(readingsX, NUM_READINGS);
-	  	          int avgY = calculate_average(readingsY, NUM_READINGS);
+	      // Si ya tenemos 10 lecturas, procesarlas
+	      if (index == NUM_READINGS) {
+	          int avgX = calculate_average(readingsX, NUM_READINGS);
+	          int avgY = calculate_average(readingsY, NUM_READINGS);
 
-	  	          char msg[50];
-	  	          sprintf(msg, "%d/%d\r\n", avgX, avgY);
-	  	          HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
-	  	          HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
-	  	          // Reiniciar índice para nuevas lecturas
-	  	          index = 0;
-	  	  }
+	          // Aplicar zona muerta usando los valores calibrados
+	          avgX = apply_deadzone(avgX, centerX);
+	          avgY = apply_deadzone(avgY, centerY);
 
-	  	  HAL_Delay(100); // Ajustar el retraso según sea necesario
+	          // Transmitir solo si hay cambios significativos
+	          if (abs(avgX - lastSentX) > CHANGE_THRESHOLD || abs(avgY - lastSentY) > CHANGE_THRESHOLD) {
+	              LED_On();  // Encender LED antes de transmitir
+
+	              char msg[50];
+	              sprintf(msg, "%d/%d\r\n", avgX, avgY);
+	              HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+	              HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+
+	              LED_Off();  // Apagar LED después de transmitir
+
+	              // Actualizar los últimos valores enviados
+	              lastSentX = avgX;
+	              lastSentY = avgY;
+	          }
+
+
+	  	    index = 0;  // Reiniciar índice
+	  	}
+
+
+	  	HAL_Delay(100); // Ajustar el retraso según sea necesario
 
     /* USER CODE END WHILE */
 
@@ -408,6 +467,7 @@ static void MX_USART2_UART_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
 /* USER CODE BEGIN MX_GPIO_Init_1 */
 /* USER CODE END MX_GPIO_Init_1 */
 
@@ -415,6 +475,16 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : PB3 */
+  GPIO_InitStruct.Pin = GPIO_PIN_3;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
