@@ -34,6 +34,8 @@
 #define NUM_READINGS 10
 #define DEADZONE 35  // Rango de la zona muerta (para el ruido)
 #define CHANGE_THRESHOLD 5  // Umbral mínimo de cambio para transmitir
+#define BUTTON_THRESHOLD 2000   // Umbral del botón pulsado
+#define BUTTON_DEBOUNCE_COUNT 10 // Número de lecturas para activar/desactivar
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -56,6 +58,10 @@ uint16_t centerX = 2048;  // Valor central de X
 uint16_t centerY = 2048;  // Valor central de Y
 int lastSentX = 0;  // Último valor enviado del eje X
 int lastSentY = 0;  // Último valor enviado del eje Y
+int pulseCounter = 0;     // Contador de lecturas consecutivas
+int isSending = 1;        // 1: Enviar datos normales, 0: Enviar 0,0
+uint32_t blockTime = 0;  // Tiempo de inicio del bloqueo
+int isBlocked = 0;       // Estado de bloqueo: 1 = bloqueado, 0 = desbloqueado
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -169,6 +175,8 @@ for (int i = 0; i < INIT_SAMPLES; i++) {
 }
 centerX = tempSumX / INIT_SAMPLES;
 centerY = tempSumY / INIT_SAMPLES;
+
+
   while (1)
   {
 	  // Leer valores del ADC
@@ -180,39 +188,63 @@ centerY = tempSumY / INIT_SAMPLES;
 	      HAL_ADC_PollForConversion(&hadc2, 1000);
 	      readingsY[index] = HAL_ADC_GetValue(&hadc2);
 
-	      index++;
+	      uint16_t currentY = readingsY[index]; // Valor actual de Y
 
-	      // Si ya tenemos 10 lecturas, procesarlas
-	      if (index == NUM_READINGS) {
-	          int avgX = calculate_average(readingsX, NUM_READINGS);
-	          int avgY = calculate_average(readingsY, NUM_READINGS);
-
-	          // Aplicar zona muerta usando los valores calibrados
-	          avgX = apply_deadzone(avgX, centerX);
-	          avgY = apply_deadzone(avgY, centerY);
-
-	          // Transmitir solo si hay cambios significativos
-	          if (abs(avgX - lastSentX) > CHANGE_THRESHOLD || abs(avgY - lastSentY) > CHANGE_THRESHOLD) {
-	              LED_On();  // Encender LED antes de transmitir
-
-	              char msg[50];
-	              sprintf(msg, "%d/%d\r\n", avgX, avgY);
-	              HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
-	              HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
-
-	              LED_Off();  // Apagar LED después de transmitir
-
-	              // Actualizar los últimos valores enviados
-	              lastSentX = avgX;
-	              lastSentY = avgY;
+	      // Verificar si el botón está presionado (Y > BUTTON_THRESHOLD)
+	      if (currentY > BUTTON_THRESHOLD && !isBlocked) {
+	          pulseCounter++;
+	          if (pulseCounter >= BUTTON_DEBOUNCE_COUNT) {
+	              isSending = !isSending;   // Alternar estado de envío
+	              pulseCounter = 0;         // Reiniciar contador
+	              if (!isSending) {
+	                  isBlocked = 1;        // Bloquear después de desactivar envío
+	                  blockTime = HAL_GetTick();  // Guardar tiempo de inicio del bloqueo
+	              }
 	          }
+	      } else {
+	          pulseCounter = 0; // Reiniciar si no está por encima del umbral
+	      }
+
+	      // Verificar si han pasado 10 segundos para desbloquear
+	      if (isBlocked && (HAL_GetTick() - blockTime >= 10000)) {
+	          isBlocked = 0; // Desbloquear
+	      }
+
+	      // Si estamos enviando datos normales
+	      if (isSending) {
+	          index++;
+	          if (index == NUM_READINGS) {
+	              int avgX = calculate_average(readingsX, NUM_READINGS);
+	              int avgY = calculate_average(readingsY, NUM_READINGS);
+
+	              // Aplicar zona muerta usando los valores calibrados
+	              avgX = apply_deadzone(avgX, centerX);
+	              avgY = apply_deadzone(avgY, centerY);
+
+	              // Transmitir solo si hay cambios significativos
+	              if (abs(avgX - lastSentX) > CHANGE_THRESHOLD || abs(avgY - lastSentY) > CHANGE_THRESHOLD) {
+	            	  LED_On();
+	                  char msg[50];
+	                  sprintf(msg, "%d/%d\r\n", avgX, avgY);
+	                  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+	                  HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+
+	                  lastSentX = avgX;
+	                  lastSentY = avgY;
+	                  LED_Off();
+	              }
+	              index = 0; // Reiniciar índice
+	          }
+	      } else {
+	          // Enviar 0,0 si estamos en modo pausa
+	          char msg[10];
+	          sprintf(msg, "0/0\r\n");
+	          HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+	          HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+	      }
 
 
-	  	    index = 0;  // Reiniciar índice
-	  	}
-
-
-	  	HAL_Delay(100); // Ajustar el retraso según sea necesario
+	  	HAL_Delay(10); // Ajustar el retraso según sea necesario
 
     /* USER CODE END WHILE */
 
